@@ -1,0 +1,35 @@
+[project]
+name = "concierge"
+dynamic = ["version"]
+description = "Manage event registrations by e-mail: classify replies, send confirmations with calendar files."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Pascal Lüttmann" }]
+
+[project.urls]
+Homepage = "https://github.com/Pluettmann/concierge"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv-windows", ".venv-linux", "dist", ".updates"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # ambiguous characters: German typography (– „“) in regexes and comments is intended
+    "RUF002",
+    "RUF003",
+    "SIM105",  # try/except/pass is clearer than contextlib.suppress in the few places it is used
+    "SIM117",  # nested `with` blocks mirror the NiceGUI element tree
+]
+
+[tool.ruff.lint.per-file-ignores]
+"app/templates.py" = ["E501"]  # inline e-mail HTML
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

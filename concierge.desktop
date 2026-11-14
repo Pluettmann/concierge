@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Concierge
+Comment=Manage event registrations by e-mail
+Comment[de]=Anmeldungen per Mail verwalten
+# Adjust the path after copying (see README):
+Exec=/PATH/TO/concierge/start.sh
+Icon=mail-mark-read
+Terminal=false
+Categories=Office;Email;

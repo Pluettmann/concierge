@@ -1,0 +1,5 @@
+# Keep LF everywhere (start.sh must run on Linux); Windows batch files need CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.zip binary
