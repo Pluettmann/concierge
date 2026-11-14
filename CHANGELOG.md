@@ -3,6 +3,11 @@
 Newest version first. The section of a version is shown to users when they install the update,
 so it is written in their language (German) and in plain words.
 
+## 2.0.1
+
+- Behoben: Beim Anlegen einer Veranstaltung schrieb der Schritt „Einladungs-Newsletter“ eine
+  unnötige Fehlermeldung ins Protokoll. Die App funktionierte dabei aber normal.
+
 ## 2.0.0
 
 - Neuer Name: Die App heißt jetzt **Concierge**.

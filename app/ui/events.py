@@ -108,11 +108,12 @@ def new_event() -> None:
             st["newsletter"] = next((i for i, m in enumerate(st["sent"])
                                      if title and title in (m.subject or "").casefold()), -1)
         with col:
-            ui.radio(options, on_change=lambda: since_row.set_visibility(st["newsletter"] == -1)).bind_value(
-                st, "newsletter").classes("w-full")
+            radio = ui.radio(options).bind_value(st, "newsletter").classes("w-full")
             with ui.row().classes("items-center gap-3") as since_row:
                 ui.date_input(t("new_event.search_from")).bind_value(st, "search_from").props("outlined dense")
             since_row.set_visibility(st["newsletter"] == -1)
+            # Register only now: bind_value fires on_change immediately, before since_row existed.
+            radio.on_value_change(lambda: since_row.set_visibility(st["newsletter"] == -1))
 
     def chosen():
         i = st["newsletter"]
