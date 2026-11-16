@@ -1,7 +1,9 @@
 """Confirm classifications and query the registration list."""
 from __future__ import annotations
 
-from .. import db
+import json
+
+from .. import classifier, db
 from ..classifier import CANCELLATION, OTHER, REGISTRATION
 from . import people
 
@@ -23,24 +25,49 @@ VIEW_BLOCKED = "blocked"
 VIEWS = (VIEW_OPEN, VIEW_DONE, VIEW_BLOCKED)
 
 
-def inbox(event_id: int, view: str = VIEW_OPEN) -> list[dict]:
+def inbox(event_id: int | None = None, view: str = VIEW_OPEN) -> list[dict]:
+    """Mails of one event, or of all active events (event_id None)."""
     where = {
         VIEW_OPEN: "m.classification IS NULL",
         VIEW_DONE: f"m.classification IN ('{REGISTRATION}', '{CANCELLATION}', '{OTHER}')",
         VIEW_BLOCKED: f"m.classification = '{BLOCKED}'",
     }[view]
+    event_filter = "m.event_id = ?" if event_id is not None else "e.status = 'active'"
     return db.query(
         f"""SELECT m.*, p.email, p.first_name AS p_first_name, p.last_name AS p_last_name, p.notes,
+               e.title AS event_title, e.date AS event_date,
                {people.familiarity_sql('m.event_id')} AS familiarity
-            FROM mail m JOIN person p ON p.id = m.person_id
-            WHERE m.event_id = ? AND {where}
-            ORDER BY m.date {'ASC' if view == VIEW_OPEN else 'DESC'}""", (event_id,))
+            FROM mail m JOIN person p ON p.id = m.person_id JOIN event e ON e.id = m.event_id
+            WHERE {event_filter} AND {where}
+            ORDER BY m.date {'ASC' if view == VIEW_OPEN else 'DESC'}""",
+        (event_id,) if event_id is not None else ())
+
+
+def move(mail_id: int, event_id: int) -> dict:
+    """Assigns a mail that is still to be reviewed to another event and classifies it anew."""
+    mail = db.query_one("SELECT * FROM mail WHERE id = ?", (mail_id,))
+    event = db.query_one("SELECT * FROM event WHERE id = ?", (event_id,))
+    has_registration = db.query_one(
+        "SELECT 1 AS x FROM registration WHERE person_id = ? AND event_id = ? AND status = 'registered'",
+        (mail["person_id"], event_id)) is not None
+    result = classifier.classify(mail["subject"], mail["body_clean"], mail["in_reply_to"], mail["refs"], event,
+                                 has_registration)
+    hidden = [r for r in json.loads(mail["reasons"] or "[]") if r == people.HIDDEN_REASON]
+    db.execute("UPDATE mail SET event_id = ?, suggestion = ?, score = ?, reasons = ?, companions = ? WHERE id = ?",
+               (event_id, result.suggestion, result.score, json.dumps(hidden + result.reasons, ensure_ascii=False),
+                result.companions, mail_id))
+    return db.query_one("SELECT * FROM mail WHERE id = ?", (mail_id,))
 
 
 def confirm(mail_id: int, classification: str, first_name: str | None = None, last_name: str | None = None,
-            companions: int = 0) -> None:
+            companions: int = 0, event_ids: list[int] | None = None) -> None:
+    """Confirms the classification of a mail. With event_ids, a registration or cancellation applies
+    to each of these events ("I'll come to both"); the mail itself belongs to the first one."""
     mail = db.query_one("SELECT * FROM mail WHERE id = ?", (mail_id,))
-    pid, eid = mail["person_id"], mail["event_id"]
+    pid = mail["person_id"]
+    eids = list(dict.fromkeys(event_ids or [mail["event_id"]]))
+    if eids[0] != mail["event_id"]:
+        db.execute("UPDATE mail SET event_id = ? WHERE id = ?", (eids[0], mail_id))
     if first_name is not None or last_name is not None:
         p = people.get(pid)
         people.update(pid, first_name=(first_name if first_name is not None else p["first_name"]).strip(),
@@ -52,19 +79,21 @@ def confirm(mail_id: int, classification: str, first_name: str | None = None, la
     with db.connect() as con:
         con.execute("UPDATE mail SET classification = ?, reviewed_at = ?, companions = ? WHERE id = ?",
                     (classification, db.now(), int(companions or 0), mail_id))
-        if classification == REGISTRATION:
-            con.execute(
-                """INSERT INTO registration (person_id, event_id, status, companions, mail_id, registered_at)
-                   VALUES (?, ?, 'registered', ?, ?, ?)
-                   ON CONFLICT(person_id, event_id) DO UPDATE SET
-                     status = 'registered', companions = excluded.companions, mail_id = excluded.mail_id""",
-                (pid, eid, int(companions or 0), mail_id, mail["date"]))
-        elif classification == CANCELLATION:
-            con.execute(
-                """INSERT INTO registration (person_id, event_id, status, mail_id, registered_at)
-                   VALUES (?, ?, 'cancelled', ?, ?)
-                   ON CONFLICT(person_id, event_id) DO UPDATE SET status = 'cancelled', mail_id = excluded.mail_id""",
-                (pid, eid, mail_id, mail["date"]))
+        for eid in eids:
+            if classification == REGISTRATION:
+                con.execute(
+                    """INSERT INTO registration (person_id, event_id, status, companions, mail_id, registered_at)
+                       VALUES (?, ?, 'registered', ?, ?, ?)
+                       ON CONFLICT(person_id, event_id) DO UPDATE SET
+                         status = 'registered', companions = excluded.companions, mail_id = excluded.mail_id""",
+                    (pid, eid, int(companions or 0), mail_id, mail["date"]))
+            elif classification == CANCELLATION:
+                con.execute(
+                    """INSERT INTO registration (person_id, event_id, status, mail_id, registered_at)
+                       VALUES (?, ?, 'cancelled', ?, ?)
+                       ON CONFLICT(person_id, event_id) DO UPDATE SET status = 'cancelled',
+                         mail_id = excluded.mail_id""",
+                    (pid, eid, mail_id, mail["date"]))
 
 
 def reset(mail_id: int) -> None:
@@ -93,7 +122,8 @@ def registrations(event_id: int) -> list[dict]:
     return db.query(
         f"""SELECT r.*, p.email, p.first_name, p.last_name, p.notes, p.blocked,
                {people.familiarity_sql('r.event_id')} AS familiarity,
-               (SELECT COUNT(*) FROM mail m WHERE m.person_id = p.id AND m.event_id = r.event_id) AS mails
+               (SELECT COUNT(*) FROM mail m WHERE m.person_id = p.id
+                  AND (m.event_id = r.event_id OR m.id = r.mail_id)) AS mails
             FROM registration r JOIN person p ON p.id = r.person_id
             WHERE r.event_id = ?
             ORDER BY r.registered_at""", (event_id,))
@@ -111,6 +141,12 @@ def delete(registration_id: int) -> None:
     db.execute("DELETE FROM registration WHERE id = ?", (registration_id,))
 
 
+# Mails of a person about an event, including the one a registration came from when that mail
+# belongs to another event ("I'll come to both").
+MAILS_OF_SQL = """person_id = :person AND (event_id = :event OR id IN (
+    SELECT mail_id FROM registration WHERE person_id = :person AND event_id = :event))"""
+
+
 def mails_of(person_id: int, event_id: int) -> list[dict]:
-    return db.query("SELECT * FROM mail WHERE person_id = ? AND event_id = ? ORDER BY date DESC",
-                    (person_id, event_id))
+    return db.query(f"SELECT * FROM mail WHERE {MAILS_OF_SQL} ORDER BY date DESC",
+                    {"person": person_id, "event": event_id})

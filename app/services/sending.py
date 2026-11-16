@@ -16,7 +16,7 @@ from .. import db, ics, templates
 from ..i18n import format_date, t
 from ..mail import imap, smtp
 from . import accounts
-from .registrations import CONFIRMATION_SENT, PERSONAL_REPLY_SENT, REJECTION_SENT
+from .registrations import CONFIRMATION_SENT, MAILS_OF_SQL, PERSONAL_REPLY_SENT, REJECTION_SENT
 
 log = logging.getLogger(__name__)
 
@@ -25,8 +25,8 @@ REPLY_STATUS = {CONFIRMATION: CONFIRMATION_SENT, REJECTION: REJECTION_SENT, PERS
 
 
 def _last_mail(person_id: int, event_id: int) -> dict | None:
-    return db.query_one("SELECT * FROM mail WHERE person_id = ? AND event_id = ? "
-                        "AND classification IS NOT 'blocked' ORDER BY date DESC LIMIT 1", (person_id, event_id))
+    return db.query_one(f"SELECT * FROM mail WHERE {MAILS_OF_SQL} AND classification IS NOT 'blocked' "
+                        "ORDER BY date DESC LIMIT 1", {"person": person_id, "event": event_id})
 
 
 def account_for(person_id: int, event_id: int) -> dict | None:

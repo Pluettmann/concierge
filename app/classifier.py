@@ -41,9 +41,9 @@ _NUMBERS = {
 }
 _GROUP_WORDS = {"zweit": 2, "dritt": 3, "viert": 4, "fünft": 5, "sechst": 6}
 _COMPANIONS = (
-    r"frau|mann|partner(in)?|freund(in)?|freundin|begleitung|tochter|sohn|kind|"
+    r"frau|mann|partner(in)?|freund(in)?|begleitung|tochter|sohn|kind|"
     r"kollegin|kollegen?|schwester|bruder|mutter|vater|mama|papa|nachbar(in)?|ehefrau|ehemann|"
-    r"lebensgefährt(e|in)|verlobten?"
+    r"lebensgefährt(e|in)|verlobte(n)?"
 )
 _COMPANION_RE = re.compile(
     rf"\bmit (meiner|meinem|meinen|unserer|unserem|einer|einem|\w+)\s+(\w+\s+)?({_COMPANIONS})\b",
@@ -177,3 +177,66 @@ def classify(subject: str, body: str, in_reply_to: str, refs: str, event: dict,
     if neg:
         reasons.append(reason("reason.negative_unrelated", phrase=neg[0]))
     return Result(OTHER, max(0, 50 - relevance), 0, reasons or [reason("reason.no_relation")])
+
+
+# --- Which event a mail belongs to -----------------------------------------------------------
+
+@dataclass
+class Assignment:
+    event: dict | None
+    reasons: list[dict] = field(default_factory=list)
+    uncertain: bool = False
+
+
+def _replies_to(event: dict, in_reply_to: str, refs: str) -> bool:
+    newsletter_id = (event.get("newsletter_message_id") or "").strip("<> ").lower()
+    return bool(newsletter_id) and newsletter_id in (_ids(in_reply_to) | _ids(refs))
+
+
+def _same_subject(event: dict, subject: str) -> bool:
+    return bool(event.get("newsletter_subject")) and normalize_subject(subject) == normalize_subject(
+        event["newsletter_subject"])
+
+
+def _mentions(event: dict, text: str) -> bool:
+    if _mentions_title(text, event.get("title", "")):
+        return True
+    try:
+        return _mentions_date(text, date.fromisoformat(event.get("date", "")))
+    except ValueError:
+        return False
+
+
+def nearest(events: list[dict], day: date) -> dict | None:
+    """The event closest to a day, preferring events that have not taken place yet."""
+    if not events:
+        return None
+    upcoming = [e for e in events if e["date"] >= day.isoformat()]
+    if upcoming:
+        return min(upcoming, key=lambda e: e["date"])
+    return max(events, key=lambda e: e["date"])
+
+
+def assign_event(subject: str, body: str, in_reply_to: str, refs: str, events: list[dict],
+                 received: date) -> Assignment:
+    """Picks the event among the active ones that a mail most likely refers to.
+
+    1. A reply to an event's newsletter (In-Reply-To/References, else the same subject).
+    2. Title or date of an event in the subject or body.
+    3. Otherwise the nearest event, marked as uncertain.
+    One newsletter can belong to several events; then step 2 decides between them.
+    """
+    if not events:
+        return Assignment(None)
+    if len(events) == 1:
+        return Assignment(events[0])
+    candidates = [e for e in events if _replies_to(e, in_reply_to, refs)] or \
+        [e for e in events if _same_subject(e, subject)] or events
+    if len(candidates) == 1:
+        return Assignment(candidates[0])
+    text = f"{subject}\n{body}".casefold()
+    mentioned = [e for e in candidates if _mentions(e, text)]
+    if len(mentioned) == 1:
+        return Assignment(mentioned[0])
+    guess = nearest(mentioned or candidates, received)
+    return Assignment(guess, [reason("reason.event_guessed")], uncertain=True)

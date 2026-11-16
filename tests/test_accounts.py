@@ -46,7 +46,7 @@ def test_fetch_continues_when_one_account_fails(event, monkeypatch):
         return "7", [msg, make_msg(message_id="<self@x>", from_email="verein@example.org")]
     monkeypatch.setattr(imap, "fetch_since", fake_fetch)
 
-    result = fetching.fetch(event)
+    result = fetching.fetch([event])
 
     assert result.new == 1  # own addresses (also of the second account) are ignored
     assert [e for e, _ in result.errors] == ["verein@example.org"]
@@ -59,7 +59,7 @@ def test_missing_password_is_reported_per_account(event, monkeypatch):
     accounts.save({"email": "verein@example.org"})
     monkeypatch.setattr(config, "get_password", lambda email: "pw" if email == "ich@example.org" else None)
     with pytest.raises(accounts.MissingPassword) as info:
-        fetching.fetch(event)
+        fetching.fetch([event])
     assert info.value.email == "verein@example.org"
 
 

@@ -36,6 +36,7 @@ def test_store_confirm_and_list(event):
 
 
 def test_familiarity(event):
+    events.update(event["id"], {"date": "2099-11-14"})  # still ahead
     people.mark_members(["mitglied@x.de"], people.SOURCE_NEWSLETTER)
     people.add_correspondents({"bekannt@x.de"})
     for i, addr in enumerate(["mitglied@x.de", "bekannt@x.de", "fremd@x.de"]):
@@ -45,9 +46,15 @@ def test_familiarity(event):
     assert status == {"mitglied@x.de": "member", "bekannt@x.de": "known", "fremd@x.de": "unknown"}
     # On the people page, the current registration does not count as attending before ...
     assert {p["email"]: p["familiarity"] for p in people.all_with_status()}["fremd@x.de"] == "unknown"
-    # ... but after archiving it does (for the next event).
-    events.create({"title": "Nächstes Mal", "date": "2027-01-10"})
+    # ... and neither does it for another event that is active at the same time ...
+    later = events.create({"title": "Nächstes Mal", "date": "2100-01-10"})
+    mid = fetching.store(events.get(later), make_msg(message_id="<later@x>", from_email="fremd@x.de",
+                                                     in_reply_to=""), "INBOX", "1")
+    assert registrations.inbox(later)[0]["familiarity"] == "known"  # earlier event counts
+    # ... but after archiving it does.
+    events.archive(event["id"])
     assert {p["email"]: p["familiarity"] for p in people.all_with_status()}["fremd@x.de"] == "known"
+    assert mid
 
 
 def test_blocked_sender_skips_inbox(event):

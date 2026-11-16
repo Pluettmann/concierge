@@ -3,7 +3,7 @@
 Bump it for every change that reaches users and add a section to CHANGELOG.md;
 then build the update file with `python tools/make_update.py`.
 """
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 
 
 def parse(version: str) -> tuple[int, ...]:

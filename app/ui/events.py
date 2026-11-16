@@ -1,4 +1,4 @@
-"""Create an event (wizard), edit and archive events."""
+"""Create an event (wizard), edit and archive events. Several events can be active at once."""
 from __future__ import annotations
 
 import urllib.parse
@@ -23,7 +23,7 @@ def new_event() -> None:
         return
     layout.setup_theme()
     layout.page_title(t("new_event.page_title"))
-    previous = events.active()
+    previous = events.latest()
     st = {"title": "", "date": "", "start_time": "19:00", "end_time": "", "venue": "", "address": "",
           "map_link": "", "info": "", "newsletter": None, "sent": [], "search_from": date.today().isoformat(),
           "take_over_members": True}
@@ -31,9 +31,6 @@ def new_event() -> None:
         st.update({k: previous[k] for k in ("start_time", "end_time", "venue", "address", "map_link")})
 
     def r_title():
-        if previous:
-            with ui.card().classes("w-full hint-warn").props("flat"):
-                ui.label(t("new_event.archives_previous", title=previous["title"])).classes("text-sm")
         ui.input(t("event.title"), placeholder=t("new_event.title_placeholder")).bind_value(st, "title").classes(
             "w-full").props("outlined autofocus")
 
@@ -109,11 +106,20 @@ def new_event() -> None:
                                      if title and title in (m.subject or "").casefold()), -1)
         with col:
             radio = ui.radio(options).bind_value(st, "newsletter").classes("w-full")
+            shared = ui.label().classes("text-sm hint-info p-2 rounded")
+
+            def show_shared():
+                m = chosen()
+                others = [e["title"] for e in events.active_events()
+                          if m and e["newsletter_message_id"] == m.message_id]
+                shared.set_text(t("new_event.newsletter_shared", titles=", ".join(others)) if others else "")
+                shared.set_visibility(bool(others))
+            show_shared()
             with ui.row().classes("items-center gap-3") as since_row:
                 ui.date_input(t("new_event.search_from")).bind_value(st, "search_from").props("outlined dense")
             since_row.set_visibility(st["newsletter"] == -1)
             # Register only now: bind_value fires on_change immediately, before since_row existed.
-            radio.on_value_change(lambda: since_row.set_visibility(st["newsletter"] == -1))
+            radio.on_value_change(lambda: (since_row.set_visibility(st["newsletter"] == -1), show_shared()))
 
     def chosen():
         i = st["newsletter"]
@@ -148,7 +154,7 @@ def new_event() -> None:
         data = {k: st[k] for k in ("title", "date", "start_time", "end_time", "venue", "address", "map_link", "info")}
         data.update(title=st["title"].strip(), search_from=search_from,
                     newsletter_message_id=m.message_id if m else "", newsletter_subject=m.subject if m else "")
-        events.create(data)
+        layout.choose_event(events.create(data))
         if m and st["take_over_members"]:
             own = accounts.own_addresses()
             n = people.mark_members([r for r in m.recipients if r not in own], people.SOURCE_NEWSLETTER)
@@ -173,17 +179,18 @@ def new_event() -> None:
 def events_page() -> None:
     if layout.guard(need_event=False) is False:
         return
-    with layout.frame("/events", t("nav.events")) as active:
+    with layout.frame("/events", t("nav.events")):
         with ui.row().classes("w-full"):
             ui.button(t("events.new"), icon="add", on_click=lambda: ui.navigate.to("/events/new"))
-        if active:
-            event_form(active)
-        all_events = events.all_events()
-        if not all_events:
+        active = events.active_events()
+        for ev in active:
+            event_form(ev, expanded=len(active) == 1)
+        archived = [ev for ev in events.all_events() if ev["status"] != events.ACTIVE]
+        if not active and not archived:
             layout.empty_state("event", t("events.empty"))
-        for ev in all_events:
-            if active and ev["id"] == active["id"]:
-                continue
+        if archived:
+            ui.label(t("events.archived")).classes("text-lg font-semibold mt-4")
+        for ev in archived:
             with ui.card().classes("w-full card-soft").props("flat"):
                 with ui.row().classes("w-full items-center"):
                     with ui.column().classes("gap-0 grow"):
@@ -194,25 +201,28 @@ def events_page() -> None:
                               on_click=lambda ev=ev: ui.navigate.to(f"/list?event={ev['id']}")).props("flat")
                     ui.button(t("events.reactivate"), icon="restart_alt",
                               on_click=lambda ev=ev: (events.reactivate(ev["id"]),
-                                                      ui.navigate.to("/overview"))).props("flat")
+                                                      ui.navigate.to(f"/overview?event={ev['id']}"))).props("flat")
 
 
-def event_form(ev: dict) -> None:
+def event_form(ev: dict, expanded: bool = True) -> None:
     st = dict(ev)
     with ui.card().classes("w-full card-soft p-6 gap-3").props("flat"):
         with ui.row().classes("w-full items-center"):
-            ui.label(t("events.current")).classes("text-lg font-semibold grow")
+            with ui.column().classes("gap-0 grow"):
+                ui.label(ev["title"]).classes("text-lg font-semibold")
+                ui.label(format_date(ev["date"])).classes("muted")
             layout.badge("events.active", "positive")
-        with ui.grid(columns=2).classes("w-full gap-3"):
-            ui.input(t("event.title")).bind_value(st, "title").props("outlined")
-            ui.date_input(t("event.date")).bind_value(st, "date").props("outlined")
-            ui.time_input(t("event.start_time")).bind_value(st, "start_time").props("outlined")
-            ui.time_input(t("event.end_time")).bind_value(st, "end_time").props("outlined")
-            ui.input(t("event.venue")).bind_value(st, "venue").props("outlined")
-            ui.input(t("event.address")).bind_value(st, "address").props("outlined")
-        ui.input(t("event.map_link")).bind_value(st, "map_link").classes("w-full").props("outlined")
-        ui.textarea(t("event.info")).bind_value(st, "info").classes("w-full").props("outlined autogrow")
-        ui.label(t("events.change_hint")).classes("muted text-sm")
+        with ui.expansion(t("events.edit"), icon="edit", value=expanded).classes("w-full"):
+            with ui.grid(columns=2).classes("w-full gap-3"):
+                ui.input(t("event.title")).bind_value(st, "title").props("outlined")
+                ui.date_input(t("event.date")).bind_value(st, "date").props("outlined")
+                ui.time_input(t("event.start_time")).bind_value(st, "start_time").props("outlined")
+                ui.time_input(t("event.end_time")).bind_value(st, "end_time").props("outlined")
+                ui.input(t("event.venue")).bind_value(st, "venue").props("outlined")
+                ui.input(t("event.address")).bind_value(st, "address").props("outlined")
+            ui.input(t("event.map_link")).bind_value(st, "map_link").classes("w-full").props("outlined")
+            ui.textarea(t("event.info")).bind_value(st, "info").classes("w-full").props("outlined autogrow")
+            ui.label(t("events.change_hint")).classes("muted text-sm")
 
         def save():
             if st["address"] != ev["address"] and st["map_link"] == ev["map_link"]:
@@ -222,15 +232,19 @@ def event_form(ev: dict) -> None:
             ui.navigate.reload()
 
         def archive():
+            def do():
+                events.archive(ev["id"])
+                ui.navigate.to("/events" if events.active_events() else "/events/new")
             with ui.dialog() as dialog, ui.card().classes("p-6"):
-                ui.label(t("events.archive_title")).classes("text-lg font-semibold")
+                ui.label(t("events.archive_title", title=ev["title"])).classes("text-lg font-semibold")
                 ui.label(t("events.archive_text")).classes("muted")
                 with ui.row().classes("w-full justify-end mt-3"):
                     ui.button(t("common.cancel"), on_click=dialog.close).props("flat")
-                    ui.button(t("events.archive_confirm"), on_click=lambda: (events.archive(ev["id"]),
-                                                                            ui.navigate.to("/events/new")))
+                    ui.button(t("events.archive_confirm"), on_click=do)
             dialog.open()
 
         with ui.row().classes("w-full justify-end gap-2"):
-            ui.button(t("events.archive_and_new"), icon="inventory_2", on_click=archive).props("flat")
+            ui.button(t("events.show_list"), icon="list",
+                      on_click=lambda: ui.navigate.to(f"/list?event={ev['id']}")).props("flat")
+            ui.button(t("events.archive_confirm"), icon="inventory_2", on_click=archive).props("flat")
             ui.button(t("common.save"), icon="save", on_click=save)

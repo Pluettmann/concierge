@@ -3,6 +3,17 @@
 Newest version first. The section of a version is shown to users when they install the update,
 so it is written in their language (German) and in plain words.
 
+## 2.1.0
+
+- Neu: **Mehrere Veranstaltungen gleichzeitig.** Eine neue Veranstaltung archiviert die bisherige
+  nicht mehr. Abgeschlossen wird von Hand oder automatisch eine Woche nach dem Datum.
+- Beim Abrufen wird jede Mail der passenden Veranstaltung zugeordnet: Antwort auf deren
+  Newsletter, sonst Titel oder Datum in der Mail. Ist das nicht eindeutig, steht im Eingang
+  „Bitte prüfen“.
+- Der Eingang zeigt die Mails aller Veranstaltungen zusammen. Die Veranstaltung lässt sich auf jeder
+  Karte ändern; bei „Ich komme zu beiden“ können mehrere gewählt werden.
+- Übersicht und Anmeldeliste haben oben eine Auswahl der Veranstaltung.
+
 ## 2.0.1
 
 - Behoben: Beim Anlegen einer Veranstaltung schrieb der Schritt „Einladungs-Newsletter“ eine

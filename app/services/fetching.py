@@ -86,15 +86,20 @@ def check_passwords() -> None:
         accounts.password(account)
 
 
-def fetch(event: dict) -> FetchResult:
-    """Fetches new mails from all accounts and creates suggestions. Runs in a background thread.
+def fetch(events: list[dict] | None = None) -> FetchResult:
+    """Fetches new mails from all accounts for all active events, assigns each mail to an event and
+    creates suggestions. Runs in a background thread.
 
     An error in one account does not stop the others.
     """
+    from . import events as events_service
+    events = events_service.active_events() if events is None else events
     check_passwords()
     result = FetchResult(thunderbird=sync_thunderbird())
+    if not events:
+        return result
     own = accounts.own_addresses()
-    since = datetime.fromisoformat(event["search_from"])
+    since = min(_search_from(e) for e in events)
     for account in accounts.all_accounts():
         try:
             try:
@@ -109,15 +114,29 @@ def fetch(event: dict) -> FetchResult:
             result.errors.append((account["email"], exc))
             continue
         for m in sorted(msgs, key=lambda m: m.date):
-            if m.from_email in own or m.date < since.replace(hour=0, minute=0, second=0):
+            if m.from_email in own:
                 continue
-            store(event, m, folder, validity, account["id"])
+            # Only events whose newsletter had already gone out when the mail arrived.
+            open_events = [e for e in events if m.date >= _search_from(e)]
+            if not open_events:
+                continue
+            store(open_events, m, folder, validity, account["id"])
             result.new += 1
     return result
 
 
-def store(event: dict, m: imap.Message, folder: str, validity: str, account_id: int | None = None) -> int:
+def _search_from(event: dict) -> datetime:
+    return datetime.fromisoformat(event["search_from"]).replace(hour=0, minute=0, second=0)
+
+
+def store(events: dict | list[dict], m: imap.Message, folder: str, validity: str,
+          account_id: int | None = None) -> int:
+    """Stores a mail for the event it most likely belongs to (see classifier.assign_event)."""
+    if isinstance(events, dict):
+        events = [events]
     body = strip_quotes(m.text)
+    assignment = classifier.assign_event(m.subject, body, m.in_reply_to, m.references, events, m.date.date())
+    event = assignment.event
     person = people.upsert(m.from_email, m.from_name, body)
     has_registration = db.query_one(
         "SELECT 1 AS x FROM registration WHERE person_id = ? AND event_id = ? AND status = 'registered'",
@@ -134,6 +153,7 @@ def store(event: dict, m: imap.Message, folder: str, validity: str, account_id: 
             # Hidden senders never count as registrations; the mail goes straight to "done".
             result.reasons.insert(0, people.HIDDEN_REASON)
             classification, reviewed = classifier.OTHER, db.now()
+    result.reasons += assignment.reasons  # after: the hidden reason must stay first (see people.hide)
     return db.execute(
         """INSERT OR IGNORE INTO mail (message_id, folder, uid, uidvalidity, person_id, sender_name, subject, date,
              body, body_clean, in_reply_to, refs, event_id, suggestion, score, reasons,

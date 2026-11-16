@@ -1,4 +1,4 @@
-"""Start page of the active event."""
+"""Start page of an event (with a selector when several are active)."""
 from __future__ import annotations
 
 from datetime import date
@@ -11,11 +11,12 @@ from ..services import events, fetching
 from . import layout
 
 
-async def fetch_mails(event: dict, button=None) -> None:
+async def fetch_mails(button=None) -> None:
+    """Fetches new mails for all active events."""
     if button:
         button.props("loading")
     try:
-        ok, result = await layout.background(fetching.fetch, event)
+        ok, result = await layout.background(fetching.fetch)
     finally:
         if button:
             button.props(remove="loading")
@@ -41,11 +42,12 @@ def index() -> None:
 
 
 @ui.page("/overview")
-def page() -> None:
-    event = layout.guard()
-    if event is False:
+def page(event: int | None = None) -> None:
+    ev = layout.guard(event_id=event)
+    if ev is False:
         return
-    with layout.frame("/overview", t("nav.overview")) as event:
+    with layout.frame("/overview", t("nav.overview"), ev) as event:
+        layout.event_selector("/overview", event)
         s = events.stats(event["id"])
 
         with ui.card().classes("w-full card-soft p-6").props("flat"):
@@ -59,7 +61,7 @@ def page() -> None:
                         ui.label(", ".join(p for p in (event["venue"], event["address"]) if p)).classes("muted")
                 with ui.column().classes("items-end gap-1"):
                     btn = ui.button(t("common.fetch_mails"), icon="sync")
-                    btn.on_click(lambda: fetch_mails(event, btn))
+                    btn.on_click(lambda: fetch_mails(btn))
                     last = db.get_setting("last_fetch")
                     if last:
                         ui.label(t("overview.last_fetch", when=format_date(last, "day_time"))).classes(
@@ -70,14 +72,19 @@ def page() -> None:
                 with ui.row().classes("w-full items-center no-wrap gap-3"):
                     ui.icon("celebration", color="primary").classes("text-2xl")
                     ui.label(t("overview.event_over")).classes("grow")
-                    ui.button(t("events.archive_and_new"), on_click=lambda: ui.navigate.to("/events")).props("flat")
+
+                    def close_event():
+                        events.archive(event["id"])
+                        ui.navigate.to("/overview" if events.active_events() else "/events/new")
+                    ui.button(t("events.archive_confirm"), icon="inventory_2", on_click=close_event).props("flat")
 
         with ui.grid(columns="repeat(auto-fit, minmax(180px, 1fr))").classes("w-full gap-4"):
             stat(t("status.registered"), s["registered"], "how_to_reg", "primary",
                  t("overview.people", count=s["people"]))
             stat(t("overview.to_review"), s["to_review"], "mark_email_unread", "orange-7", t("overview.new_mails"),
                  "/inbox")
-            stat(t("overview.open"), s["open"], "schedule_send", "info", t("overview.without_reply"), "/list")
+            stat(t("overview.open"), s["open"], "schedule_send", "info", t("overview.without_reply"),
+                 f"/list?event={event['id']}")
             stat(t("status.cancelled"), s["cancelled"], "event_busy", "grey-7", "")
 
         if s["to_review"]:
@@ -92,7 +99,8 @@ def page() -> None:
                 with ui.row().classes("w-full items-center no-wrap"):
                     ui.icon("send", color="primary").classes("text-3xl")
                     ui.label(t("overview.unanswered", count=s["open"])).classes("grow text-lg")
-                    ui.button(t("overview.to_list"), on_click=lambda: ui.navigate.to("/list")).props(
+                    ui.button(t("overview.to_list"),
+                              on_click=lambda: ui.navigate.to(f"/list?event={event['id']}")).props(
                         "icon-right=arrow_forward")
 
 

@@ -19,6 +19,9 @@ ACCENT = "#4f46e5"
 # Hint shown on every page, e.g. if the app was not closed properly last time (set in main.py).
 startup_warning: str | None = None
 
+# The event last chosen in the event selector (the app has a single local user).
+_chosen_event: dict[str, int | None] = {"id": None}
+
 # (path, icon, translation key)
 NAV = [
     ("/overview", "space_dashboard", "nav.overview"),
@@ -99,16 +102,51 @@ def is_configured() -> bool:
     return db.is_open() and db.get_setting("setup_done") == "1" and config.load_local().get("local_setup_done")
 
 
-def guard(need_event: bool = True) -> dict | bool | None:
-    """Redirects to the setup or to a new event. Returns False if it redirected."""
+def current_event(event_id: int | None = None) -> dict | None:
+    """The event a page shows: the requested one, else the one chosen last, else the next upcoming.
+
+    A requested active event is remembered for the following pages; archived ones are only shown.
+    """
+    if event_id:
+        event = events.get(event_id)
+        if event:
+            if event["status"] == events.ACTIVE:
+                _chosen_event["id"] = event["id"]
+            return event
+    if _chosen_event["id"]:
+        event = events.get(_chosen_event["id"])
+        if event and event["status"] == events.ACTIVE:
+            return event
+    return events.active()
+
+
+def choose_event(event_id: int | None) -> None:
+    _chosen_event["id"] = event_id
+
+
+def guard(need_event: bool = True, event_id: int | None = None) -> dict | bool | None:
+    """Redirects to the setup or to a new event. Returns False if it redirected, otherwise the
+    event the page shows (see current_event)."""
     if not is_configured():
         ui.navigate.to("/setup")
         return False
-    event = events.active()
+    events.archive_past()
+    event = current_event(event_id)
     if need_event and event is None:
         ui.navigate.to("/events/new")
         return False
     return event
+
+
+def event_selector(path: str, event: dict) -> None:
+    """Selector for the event a page shows; only when several events are active."""
+    active = events.active_events()
+    if len(active) < 2 or event["status"] != events.ACTIVE:
+        return
+    options = {e["id"]: t("header.event", title=e["title"], date=format_date(e["date"])) for e in active}
+    ui.select(options, value=event["id"], label=t("event.selector"),
+              on_change=lambda e: ui.navigate.to(f"{path}?event={e.value}")).props(
+        "outlined dense options-dense").classes("w-80 max-w-full")
 
 
 def page_title(title: str) -> None:
@@ -116,12 +154,13 @@ def page_title(title: str) -> None:
 
 
 @contextmanager
-def frame(path: str, title: str):
-    """Page frame with header and navigation."""
+def frame(path: str, title: str, event: dict | None = None):
+    """Page frame with header and navigation. Yields the event shown (by default the current one)."""
     setup_theme()
     page_title(title)
-    event = events.active() if db.is_open() else None
-    stats = events.stats(event["id"]) if event else {}
+    if event is None and db.is_open():
+        event = current_event()
+    to_review = events.to_review_total() if db.is_open() else 0
 
     with ui.header().classes("app-bar").style("border-bottom: 1px solid"):
         with ui.row().classes("w-full items-center no-wrap px-2 py-1"):
@@ -144,8 +183,8 @@ def frame(path: str, title: str):
                     + (" nav-active" if active else "")):
                 ui.icon(icon).classes("text-xl")
                 ui.label(t(key)).classes("grow")
-                if href == "/inbox" and stats.get("to_review"):
-                    ui.badge(str(stats["to_review"]), color="primary").props("rounded")
+                if href == "/inbox" and to_review:
+                    ui.badge(str(to_review), color="primary").props("rounded")
                 if href == "/settings" and updater.available:
                     ui.badge(t("nav.update_badge"), color="positive").props("rounded").tooltip(
                         t("update.available", version=updater.available.version))

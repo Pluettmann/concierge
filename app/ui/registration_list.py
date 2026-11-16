@@ -74,13 +74,13 @@ def _rows(event_id: int) -> list[dict]:
 
 @ui.page("/list")
 def page(event: int | None = None) -> None:
-    active = layout.guard()
-    if active is False:
+    ev = layout.guard(event_id=event)
+    if ev is False:
         return
-    ev = events.get(event) if event else active
     readonly = ev["status"] != events.ACTIVE
     title = t("list.title_archive", title=ev["title"]) if readonly else t("list.title")
-    with layout.frame("/list", title):
+    with layout.frame("/list", title, ev):
+        layout.event_selector("/list", ev)
         f = {"search": "", "status": REGISTERED, "familiarity": [], "reply": "all"}
         all_rows = {"rows": _rows(ev["id"])}
 

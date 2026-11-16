@@ -29,7 +29,24 @@ unter <http://127.0.0.1:8737>. Die App ist nur vom eigenen Rechner aus erreichba
 4. **Anmeldeliste:** nach Bekanntheit (Mitglied, bekannt, unbekannt) und Antwortstatus filtern,
    Personen auswählen und dann eine **Zusage** (mit Kalenderdatei), eine **Absage** oder eine
    **persönliche** Antwort schicken.
-5. Nach der Veranstaltung: *Veranstaltungen → Abschließen & neue anlegen*.
+5. Nach der Veranstaltung: *Veranstaltungen → Abschließen*. Eine Woche nach dem Datum passiert das
+   auch automatisch.
+
+## Mehrere Veranstaltungen gleichzeitig
+
+Es können mehrere Veranstaltungen aktiv sein, z. B. die im nächsten und die im übernächsten Monat.
+Eine neue Veranstaltung archiviert die bisherigen nicht mehr.
+
+- **Zuordnung beim Abrufen:** Eine Antwort auf den Newsletter einer Veranstaltung landet sicher bei
+  ihr. Sonst entscheiden Titel oder Datum in der Mail. Ist auch das nicht eindeutig, wird die
+  nächste Veranstaltung vorgeschlagen und die Mail mit „Bitte prüfen“ markiert.
+- **Eingang:** Er zeigt die neuen Mails aller Veranstaltungen zusammen. Auf jeder Karte steht die
+  Veranstaltung und lässt sich mit einem Klick ändern. Bei „Ich komme zu beiden“ einfach beide
+  wählen und dann *Anmeldung* klicken.
+- **Übersicht und Anmeldeliste:** Oben wählst du, welche Veranstaltung du siehst. Zusage-Mail und
+  Kalenderdatei enthalten die Daten dieser Veranstaltung.
+- **Ein Newsletter für mehrere Termine:** Er kann bei mehreren Veranstaltungen gewählt werden. Dann
+  entscheiden Titel und Datum in der Antwort.
 
 Jede Antwort wird im Gesendet-Ordner abgelegt, und die Originalmail wird als „beantwortet“
 markiert. In Thunderbird ist dadurch alles wie gewohnt sichtbar.
@@ -39,7 +56,7 @@ markiert. In Thunderbird ist dadurch alles wie gewohnt sichtbar.
 - *Mitglied*: steht in der gewählten Thunderbird-Liste, war Empfänger des Newsletters oder wurde
   von Hand markiert.
 - *Bekannt*: steht im Thunderbird-Adressbuch, hat schon einmal eine Mail von dir bekommen oder war
-  bei einer früheren Veranstaltung angemeldet.
+  bei einer früheren (zeitlich davor liegenden) Veranstaltung angemeldet.
 - *Unbekannt*: alle anderen.
 
 ## Mehrere Postfächer

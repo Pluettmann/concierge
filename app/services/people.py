@@ -19,21 +19,23 @@ SOURCE_MANUAL = "manual"
 
 HIDDEN_REASON = reason("reason.sender_hidden")
 
-# Outside of an event, the active one does not count as "attended before".
-ACTIVE_EVENT_SQL = "(SELECT COALESCE(MAX(id), -1) FROM event WHERE status = 'active')"
-
-
-def familiarity_sql(event_param: str = "?") -> str:
+def familiarity_sql(event_param: str | None = "?") -> str:
     """SQL expression for the familiarity status of a person `p`.
 
-    A registration for a *different* event makes a person known.
+    A registration for an *earlier* event makes a person known. Several events can be active at
+    once, so a registration for another upcoming event does not count. Outside of an event
+    (event_param None), registrations for archived or past events count.
     """
+    if event_param is None:
+        earlier = "(e2.status = 'archived' OR e2.date < date('now', 'localtime'))"
+    else:
+        earlier = f"r2.event_id <> {event_param} AND e2.date < (SELECT date FROM event WHERE id = {event_param})"
     return f"""CASE
         WHEN p.is_member = 1 THEN '{MEMBER}'
         WHEN p.in_address_book = 1
           OR EXISTS (SELECT 1 FROM correspondent c WHERE c.email = p.email)
-          OR EXISTS (SELECT 1 FROM registration r2 WHERE r2.person_id = p.id
-                     AND r2.event_id <> {event_param} AND r2.status = 'registered')
+          OR EXISTS (SELECT 1 FROM registration r2 JOIN event e2 ON e2.id = r2.event_id
+                     WHERE r2.person_id = p.id AND r2.status = 'registered' AND {earlier})
         THEN '{KNOWN}' ELSE '{UNKNOWN}' END"""
 
 
@@ -108,7 +110,7 @@ def all_with_status(search: str = "", hidden: bool = False) -> list[dict]:
     """People with familiarity status; hidden people only with hidden=True (then only those)."""
     like = f"%{search.lower()}%"
     return db.query(
-        f"""SELECT p.*, {familiarity_sql(ACTIVE_EVENT_SQL)} AS familiarity,
+        f"""SELECT p.*, {familiarity_sql(None)} AS familiarity,
                (SELECT COUNT(*) FROM registration r WHERE r.person_id = p.id AND r.status = 'registered')
                  AS registrations
             FROM person p

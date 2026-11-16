@@ -1,7 +1,12 @@
-"""Create, change and archive events; key figures."""
+"""Create, change and archive events; key figures.
+
+Several events can be active at the same time (e.g. next month and the month after). An event is
+archived when it is closed by hand, or automatically a while after its date.
+"""
 from __future__ import annotations
 
 import uuid
+from datetime import date, timedelta
 
 from .. import db
 
@@ -12,10 +17,42 @@ ICS_FIELDS = ("title", "date", "start_time", "end_time", "venue", "address", "in
 
 ACTIVE = "active"
 ARCHIVED = "archived"
+# Late mails (thanks, photos, "next time") still arrive in the days after an event.
+AUTO_ARCHIVE_AFTER = timedelta(days=7)
+
+
+def active_events() -> list[dict]:
+    """All active events, the earliest first."""
+    return db.query("SELECT * FROM event WHERE status = 'active' ORDER BY date, id")
 
 
 def active() -> dict | None:
-    return db.query_one("SELECT * FROM event WHERE status = 'active' ORDER BY date DESC LIMIT 1")
+    """The event shown when nothing else is chosen: the next upcoming one, otherwise the latest."""
+    events = active_events()
+    today = date.today().isoformat()
+    return next((e for e in events if e["date"] >= today), events[-1] if events else None)
+
+
+def archive_past(today: date | None = None) -> int:
+    """Archives active events whose date is more than AUTO_ARCHIVE_AFTER ago.
+
+    Each event is archived automatically only once, when it passes that limit: an event that was
+    reactivated by hand afterwards stays active.
+    """
+    limit = ((today or date.today()) - AUTO_ARCHIVE_AFTER).isoformat()
+    previous = db.get_setting("auto_archived_before")
+    if previous >= limit:
+        return 0
+    with db.connect() as con:
+        count = con.execute("UPDATE event SET status = 'archived' WHERE status = 'active' AND date < ? "
+                            "AND date >= ?", (limit, previous)).rowcount
+    db.set_settings(auto_archived_before=limit)
+    return count
+
+
+def latest() -> dict | None:
+    """The event created last (its place and time are suggested for the next one)."""
+    return db.query_one("SELECT * FROM event ORDER BY created_at DESC, id DESC LIMIT 1")
 
 
 def get(event_id: int) -> dict | None:
@@ -32,7 +69,7 @@ def all_events() -> list[dict]:
            FROM event e ORDER BY e.date DESC""")
 
 
-def create(data: dict, archive_others: bool = True) -> int:
+def create(data: dict, archive_others: bool = False) -> int:
     values = {k: data.get(k, "") or "" for k in FIELDS}
     if not values["search_from"]:
         values["search_from"] = db.now()
@@ -62,9 +99,14 @@ def archive(event_id: int) -> None:
 
 
 def reactivate(event_id: int) -> None:
-    with db.connect() as con:
-        con.execute("UPDATE event SET status = 'archived' WHERE status = 'active'")
-        con.execute("UPDATE event SET status = 'active' WHERE id = ?", (event_id,))
+    db.execute("UPDATE event SET status = 'active' WHERE id = ?", (event_id,))
+
+
+def to_review_total() -> int:
+    """Mails still to review across all active events (the inbox shows them together)."""
+    return db.query_one(
+        "SELECT COUNT(*) AS n FROM mail m JOIN event e ON e.id = m.event_id "
+        "WHERE e.status = 'active' AND m.classification IS NULL")["n"]
 
 
 def stats(event_id: int) -> dict:
